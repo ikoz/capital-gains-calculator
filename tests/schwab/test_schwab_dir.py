@@ -143,15 +143,15 @@ def test_adjacent_exports_are_not_refused(tmp_path: Path) -> None:
     assert len(load_via_cli(schwab_dir=str(directory))) == 3
 
 
-def test_a_vest_dated_inside_the_older_export_is_not_an_overlap(
+def test_an_earlier_award_price_date_does_not_make_exports_overlap(
     tmp_path: Path,
 ) -> None:
-    """Exports are compared by the dates they state, not by vest dates.
+    """An earlier award-price date does not make two exports overlap.
 
     The older export runs from 2 May to 16 August and the newer one from 18
-    August. The vest in the newer one happened on 15 August, inside the older
-    export's dates, but was posted on 18 August. No row is in both files, so
-    they are combined, and the vest still takes its award date.
+    August. The newer export's acquisition is priced from a 15 August award
+    inside the older export's dates. Its brokerage date stays 18 August, so
+    the non-overlapping exports are combined.
     """
     directory = tmp_path / "schwab"
     directory.mkdir()
@@ -169,7 +169,7 @@ def test_a_vest_dated_inside_the_older_export_is_not_an_overlap(
 
     transactions = load_via_cli(schwab_dir=str(directory), schwab_award_file=awards)
 
-    assert [t.date for t in transactions if t.symbol == "BAR"] == [dt.date(2023, 8, 15)]
+    assert [t.date for t in transactions if t.symbol == "BAR"] == [dt.date(2023, 8, 18)]
 
 
 def test_empty_directory_warns(

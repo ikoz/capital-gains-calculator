@@ -299,12 +299,11 @@ def test_run_with_schwab_cash_merger_files(request: pytest.FixtureRequest) -> No
 
 
 def test_run_with_schwab_rsu_settlement_files(request: pytest.FixtureRequest) -> None:
-    """Date a vest by the award, not by when Schwab posted it.
+    """Keep the brokerage date when the award file supplies a missing price.
 
-    The 200 shares vest on 15 August and post on 18 August, the day the same
-    number is sold. Dated by the vest, they join the pool before the sale, so
-    the sale takes its cost from the pool rather than from the vest under the
-    same-day rule.
+    The award is dated 15 August; the brokerage acquisition and sale are
+    dated 18 August. They match under the same-day rule, leaving the cost
+    of the earlier 300 shares in the pool.
     """
     cmd = build_cmd(
         "--year",
@@ -499,16 +498,40 @@ def test_stock_activity_without_symbol() -> None:
         _read(content)
 
 
-def test_a_vest_posted_without_as_of_takes_the_award_date() -> None:
-    """A posting date with no 'as of' still gives way to the award's vest date."""
+@pytest.mark.parametrize(
+    ("cell", "award_date", "brokerage_date"),
+    [
+        ("08/18/2023", dt.date(2023, 8, 15), dt.date(2023, 8, 18)),
+        (
+            "08/18/2023 as of 08/15/2023",
+            dt.date(2023, 8, 15),
+            dt.date(2023, 8, 18),
+        ),
+        (
+            "06/03/2024 as of 05/31/2024",
+            dt.date(2024, 5, 31),
+            dt.date(2024, 6, 3),
+        ),
+        (
+            "04/08/2024 as of 04/05/2024",
+            dt.date(2024, 4, 5),
+            dt.date(2024, 4, 8),
+        ),
+    ],
+)
+def test_award_price_lookup_keeps_the_brokerage_date(
+    cell: str, award_date: dt.date, brokerage_date: dt.date
+) -> None:
+    """Looking up a price cannot move the acquisition into another day or tax year."""
     SchwabParser.awards_prices = AwardPrices(
-        award_prices={dt.date(2023, 8, 15): {"BAR": Decimal("140.35")}}
+        award_prices={award_date: {"BAR": Decimal("140.35")}}
     )
-    content = SCHWAB_HEADER + "08/18/2023,Stock Plan Activity,BAR,Vest,,200,,\n"
+    content = SCHWAB_HEADER + f"{cell},Stock Plan Activity,BAR,Vest,,200,,\n"
 
     (vest,) = _read(content)
 
-    assert vest.date == dt.date(2023, 8, 15)
+    assert vest.date == brokerage_date
+    assert vest.price == Decimal("140.35")
 
 
 @pytest.mark.parametrize(
@@ -531,12 +554,7 @@ def test_a_vest_posted_without_as_of_takes_the_award_date() -> None:
 def test_a_vest_between_a_buy_and_its_cancellation_does_not_hide_the_buy(
     rows: str,
 ) -> None:
-    """The Cancel Buy search walks the dates the CSV states, not a vest's award date.
-
-    The vest is posted on 18 August but dated by its award, 15 August. Read by
-    that date it would end the search before it reaches the Buy, in either
-    direction the search looks.
-    """
+    """An award-price lookup does not interrupt finding a cancelled purchase."""
     SchwabParser.awards_prices = AwardPrices(
         award_prices={dt.date(2023, 8, 15): {"BAR": Decimal("140.35")}}
     )

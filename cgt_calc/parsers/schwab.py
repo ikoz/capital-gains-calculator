@@ -302,9 +302,8 @@ class SchwabTransaction(BrokerTransaction):
                 f"Invalid date format: {date_str!r}, expected MM/DD/YYYY, "
                 "e.g. '01/15/2023'",
             ) from exc
-        # The date the export states. A vest priced from the award file is
-        # re-dated to its vest, but the file's own date range and its row
-        # order are in these dates.
+        # The brokerage export's date also orders its rows and defines the
+        # source file's date range, independently of any award-price lookup.
         self.posted_on = date
         action_header = RequiredTransactionsColumn.ACTION.value
         self.raw_action = row_dict[action_header]
@@ -375,14 +374,11 @@ class SchwabTransaction(BrokerTransaction):
             symbol = transaction.symbol
             if symbol is None:
                 raise SymbolMissingError(transaction)
-            # The transaction list dates a vest by when Schwab posted it, a few
-            # days after the vest itself. The shares are acquired at the vest,
-            # when the employee becomes beneficially entitled to them, not when
-            # they are transferred (ERSM20420), and the award file's price is
-            # the market value on that day, so the date is taken from the award
-            # file along with the price.
+            # An award's vesting date does not establish when shares were
+            # issued in settlement. Retain the brokerage date and use the
+            # award file only to supply the missing price.
             try:
-                transaction.date, transaction.price = awards_prices.get(
+                _award_date, transaction.price = awards_prices.get(
                     transaction.date, symbol
                 )
             except KeyError as err:

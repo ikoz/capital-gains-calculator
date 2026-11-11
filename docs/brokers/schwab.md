@@ -161,22 +161,22 @@ calculation could create a purchase that never happened.
 Schwab can show a date such as `08/18/2023 as of 08/15/2023`. cgt-calc uses the first date,
 `08/18/2023`, for the transaction.
 
-A vest is the exception. Schwab posts the shares a few days after they vest, and the main CSV may
-show only that posting date. You acquire the shares when you become entitled to them, at the vest,
-not when they are transferred to your brokerage account
-([ERSM20420](https://www.gov.uk/hmrc-internal-manuals/employment-related-securities/ersm20420)), and
-their capital gains cost is their market value on that date
-([HS287](https://www.gov.uk/government/publications/employee-share-and-security-schemes-and-capital-gains-tax-hs287-self-assessment-helpsheet)).
-So when cgt-calc prices a `Stock Plan Activity` row from your [award file](#price-only-export), it
-also takes the vest date from that award, whichever date the main CSV shows. A vest posted on 18
-August from shares that vested on 15 August is dated 15 August, so a sale on 18 August is no longer
-matched to that vest under the same-day rule. It is matched in the usual order: other acquisitions
-on 18 August first, then those in the following 30 days, then your pool
-([CG51560](https://www.gov.uk/hmrc-internal-manuals/capital-gains-manual/cg51560)).
+`Stock Plan Activity` rows also retain the brokerage transaction date when an
+[award file](#price-only-export) supplies a missing price. The award file supplies the price only.
+For example, an acquisition dated 18 August stays on 18 August even if its price comes from an award
+dated 15 August, and can match a sale on 18 August under the same-day rule.
 
-For other rows, the date affects the tax year, the exchange rate and the same-day and 30-day
-matching rules. Check any such row carefully when the two dates cross 5 April or another purchase or
-disposal falls between them.
+Vesting and share acquisition need not happen together. Award terms can provide for settlement after
+vesting and withhold ownership until shares are issued in settlement.
+[ERSM20420](https://www.gov.uk/hmrc-internal-manuals/employment-related-securities/ersm20420)
+distinguishes beneficial acquisition from a later transfer. Confirm the acquisition date against
+your award terms and share-issuance or settlement records; the first brokerage date is the retained
+calculation policy and does not establish ownership on its own. Complete Equity Awards exports use
+the dates supplied in those exports.
+
+The date affects the tax year, the exchange rate and the same-day and 30-day matching rules. Check
+any such row carefully when the dates cross 5 April or another purchase or disposal falls between
+them.
 
 ### Bonds and Treasury securities
 
