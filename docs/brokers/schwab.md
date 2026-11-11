@@ -161,18 +161,31 @@ calculation could create a purchase that never happened.
 Schwab can show a date such as `08/18/2023 as of 08/15/2023`. cgt-calc uses the first date,
 `08/18/2023`, for the transaction.
 
-`Stock Plan Activity` rows also retain the brokerage transaction date when an
-[award file](#price-only-export) supplies a missing price. The award file supplies the price only.
-For example, an acquisition dated 18 August stays on 18 August even if its price comes from an award
-dated 15 August, and can match a sale on 18 August under the same-day rule.
+For `Stock Plan Activity` rows whose missing price comes from an [award file](#price-only-export),
+choose the acquisition date source with `--schwab-acquisition-date`:
 
-Vesting and share acquisition need not happen together. Award terms can provide for settlement after
-vesting and withhold ownership until shares are issued in settlement.
+- `brokerage` (the default in this fork): retain the first date in the brokerage transaction
+    history. An acquisition dated 18 August stays on 18 August even if its price comes from award
+    activity dated 15 August. It can match a sale on 18 August under the same-day rule.
+- `award`: use the matching activity date from the award-price CSV or Lapse-only JSON export. In
+    that example, the acquisition moves to 15 August. This is the activity date, not the original
+    grant date in the `AwardDate` field.
+
+For example, add `--schwab-acquisition-date award` to select award dates. Both choices use the same
+award price. The option works with `--schwab-file` and `--schwab-dir`; it changes only the date of
+`Stock Plan Activity` rows priced from the award file. Rows with their own price and transactions
+imported from complete Equity Awards exports keep their exported dates.
+
+RSUs are contractual rights under an award, distinct from the underlying shares themselves. Vesting
+satisfies the award's conditions, but need not give ownership of those shares. For example, section
+2 of a
+[publicly filed award agreement](https://www.sec.gov/Archives/edgar/data/1326801/000132680122000057/meta03312022-ex103.htm)
+says that until shares are issued in settlement, the participant has "no ownership of the Shares
+allocated to the RSUs".
 [ERSM20420](https://www.gov.uk/hmrc-internal-manuals/employment-related-securities/ersm20420)
 distinguishes beneficial acquisition from a later transfer. Confirm the acquisition date against
-your award terms and share-issuance or settlement records; the first brokerage date is the retained
-calculation policy and does not establish ownership on its own. Complete Equity Awards exports use
-the dates supplied in those exports.
+your award terms and share-issuance or settlement records before choosing a source. Neither a
+brokerage entry nor a vesting entry establishes the legal acquisition date on its own.
 
 The date affects the tax year, the exchange rate and the same-day and 30-day matching rules. Check
 any such row carefully when the dates cross 5 April or another purchase or disposal falls between

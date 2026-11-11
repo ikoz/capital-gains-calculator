@@ -298,13 +298,26 @@ def test_run_with_schwab_cash_merger_files(request: pytest.FixtureRequest) -> No
     assert_stdout_matches(result, cmd, expected_file)
 
 
-def test_run_with_schwab_rsu_settlement_files(request: pytest.FixtureRequest) -> None:
-    """Keep the brokerage date when the award file supplies a missing price.
+@pytest.mark.parametrize(
+    ("date_source", "expected_name"),
+    [
+        (None, "expected_output.txt"),
+        ("brokerage", "expected_output.txt"),
+        ("award", "expected_output_award_date.txt"),
+    ],
+)
+def test_run_with_schwab_rsu_settlement_files(
+    request: pytest.FixtureRequest, date_source: str | None, expected_name: str
+) -> None:
+    """The selected acquisition date determines whether the sale matches that day.
 
     The award is dated 15 August; the brokerage acquisition and sale are
-    dated 18 August. They match under the same-day rule, leaving the cost
-    of the earlier 300 shares in the pool.
+    dated 18 August. Brokerage dates give a same-day match, leaving the
+    earlier 300 shares' cost in the pool; award dates match from the pool.
     """
+    date_args = (
+        ("--schwab-acquisition-date", date_source) if date_source is not None else ()
+    )
     cmd = build_cmd(
         "--year",
         "2023",
@@ -312,14 +325,13 @@ def test_run_with_schwab_rsu_settlement_files(request: pytest.FixtureRequest) ->
         "tests/schwab/data/rsu_settlement/transactions.csv",
         "--schwab-award-file",
         "tests/schwab/data/rsu_settlement/awards.csv",
+        *date_args,
         "--output",
         report_path(request),
     )
     result = run_cli(cmd)
     assert stderr_alerts(result.stderr) == []
-    expected_file = (
-        Path("tests") / "schwab" / "data" / "rsu_settlement" / "expected_output.txt"
-    )
+    expected_file = Path("tests") / "schwab" / "data" / "rsu_settlement" / expected_name
     assert_stdout_matches(result, cmd, expected_file)
 
 
@@ -498,6 +510,7 @@ def test_stock_activity_without_symbol() -> None:
         _read(content)
 
 
+@pytest.mark.parametrize("date_source", ["brokerage", "award"])
 @pytest.mark.parametrize(
     ("cell", "award_date", "brokerage_date"),
     [
@@ -519,21 +532,78 @@ def test_stock_activity_without_symbol() -> None:
         ),
     ],
 )
-def test_award_price_lookup_keeps_the_brokerage_date(
-    cell: str, award_date: dt.date, brokerage_date: dt.date
+def test_award_price_lookup_uses_the_selected_date_source(
+    tmp_path: Path,
+    cell: str,
+    award_date: dt.date,
+    brokerage_date: dt.date,
+    date_source: str,
 ) -> None:
-    """Looking up a price cannot move the acquisition into another day or tax year."""
-    SchwabParser.awards_prices = AwardPrices(
-        award_prices={award_date: {"BAR": Decimal("140.35")}}
+    """The CLI choice applies across weekends, months and the tax year boundary."""
+    fixture = Path("tests") / "schwab" / "data" / "rsu_settlement"
+    award_file = tmp_path / "awards.csv"
+    award_file.write_text(
+        (fixture / "awards.csv")
+        .read_text()
+        .replace("08/15/2023", award_date.strftime("%m/%d/%Y"))
     )
-    content = SCHWAB_HEADER + f"{cell},Stock Plan Activity,BAR,Vest,,200,,\n"
+    history = tmp_path / "transactions.csv"
+    history.write_text(SCHWAB_HEADER + f"{cell},Stock Plan Activity,BAR,Vest,,200,,\n")
 
-    (vest,) = _read(content)
+    (vest,) = load_via_cli(
+        schwab_file=str(history),
+        schwab_award_file=str(award_file),
+        schwab_acquisition_date=date_source,
+    )
 
-    assert vest.date == brokerage_date
+    assert vest.date == (award_date if date_source == "award" else brokerage_date)
     assert vest.price == Decimal("140.35")
 
 
+def test_a_new_load_resets_the_acquisition_date_source() -> None:
+    """An award-date run cannot change the default of a subsequent run."""
+    fixture = Path("tests") / "schwab" / "data" / "rsu_settlement"
+    flags = {
+        "schwab_file": str(fixture / "transactions.csv"),
+        "schwab_award_file": str(fixture / "awards.csv"),
+    }
+    award_transactions = load_via_cli(**flags, schwab_acquisition_date="award")
+    default_transactions = load_via_cli(**flags)
+
+    (award_vest,) = [
+        t for t in award_transactions if t.action == ActionType.STOCK_ACTIVITY
+    ]
+    (default_vest,) = [
+        t for t in default_transactions if t.action == ActionType.STOCK_ACTIVITY
+    ]
+    assert award_vest.date == dt.date(2023, 8, 15)
+    assert default_vest.date == dt.date(2023, 8, 18)
+    assert award_vest.price == default_vest.price == Decimal("140.35")
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [
+        {"schwab_file": "tests/schwab/data/schwab_transactions.csv"},
+        {
+            "schwab_award_file": (
+                "tests/schwab/data/equity_award/schwab_equity_award_v2.json"
+            )
+        },
+    ],
+)
+def test_the_date_option_leaves_transactions_without_price_lookup_unchanged(
+    flags: dict[str, str],
+) -> None:
+    """Own-price rows and complete award imports keep their exported dates."""
+    brokerage = load_via_cli(**flags, schwab_acquisition_date="brokerage")
+    award = load_via_cli(**flags, schwab_acquisition_date="award")
+
+    assert brokerage
+    assert [repr(t) for t in brokerage] == [repr(t) for t in award]
+
+
+@pytest.mark.parametrize("use_award_date", [False, True])
 @pytest.mark.parametrize(
     "rows",
     [
@@ -553,11 +623,14 @@ def test_award_price_lookup_keeps_the_brokerage_date(
 )
 def test_a_vest_between_a_buy_and_its_cancellation_does_not_hide_the_buy(
     rows: str,
+    use_award_date: bool,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An award-price lookup does not interrupt finding a cancelled purchase."""
     SchwabParser.awards_prices = AwardPrices(
         award_prices={dt.date(2023, 8, 15): {"BAR": Decimal("140.35")}}
     )
+    monkeypatch.setattr(SchwabParser, "use_award_date", use_award_date)
 
     (vest,) = _read(SCHWAB_HEADER + rows)
 
